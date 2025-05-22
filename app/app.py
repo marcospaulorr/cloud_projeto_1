@@ -10,6 +10,8 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import create_engine, Column, Integer, String, MetaData, Table, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import OperationalError
+import time
 import requests
 import socket
 from bs4 import BeautifulSoup
@@ -21,7 +23,28 @@ import pymysql
 load_dotenv()
 
 # Configuração do banco de dados
-DATABASE_URL = os.getenv("DATABASE_URL") or f"mysql+pymysql://{os.getenv('MYSQL_USER')}:{os.getenv('MYSQL_PASSWORD')}@db:3306/{os.getenv('MYSQL_DATABASE')}"
+db_user = os.getenv("DB_USER")
+db_password = os.getenv("DB_PASSWORD")
+db_host = os.getenv("DB_HOST")
+db_port = os.getenv("DB_PORT")
+db_name = os.getenv("DB_NAME")
+
+DATABASE_URL = f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+max_retries = 10
+for attempt in range(max_retries):
+    try:
+        engine = create_engine(DATABASE_URL)
+        connection = engine.connect()
+        print("✅ Conectado ao banco com sucesso.")
+        break
+    except OperationalError as e:
+        print(f"⏳ Tentativa {attempt+1}/{max_retries}: Banco ainda não está pronto...")
+        time.sleep(2)
+else:
+    raise Exception("❌ Não foi possível conectar ao banco de dados.")
+
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
