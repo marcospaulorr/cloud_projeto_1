@@ -2,7 +2,8 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, Depends, HTTPException, status, Header
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -17,7 +18,6 @@ import socket
 from bs4 import BeautifulSoup
 import json
 from dotenv import load_dotenv
-import pymysql
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -29,7 +29,7 @@ db_host = os.getenv("DB_HOST")
 db_port = os.getenv("DB_PORT")
 db_name = os.getenv("DB_NAME")
 
-DATABASE_URL = f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+DATABASE_URL = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
 max_retries = 10
 for attempt in range(max_retries):
@@ -37,13 +37,13 @@ for attempt in range(max_retries):
         engine = create_engine(DATABASE_URL)
         connection = engine.connect()
         print("✅ Conectado ao banco com sucesso.")
+        connection.close()
         break
     except OperationalError as e:
         print(f"⏳ Tentativa {attempt+1}/{max_retries}: Banco ainda não está pronto...")
         time.sleep(2)
 else:
     raise Exception("❌ Não foi possível conectar ao banco de dados.")
-
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -57,14 +57,17 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 # Configuração de criptografia para senhas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# ✅ CORREÇÃO: Configuração de segurança para Swagger
+security = HTTPBearer()
+
 # Modelos de dados
 class User(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
+    name = Column(String(255), index=True)
+    email = Column(String(255), unique=True, index=True)
+    hashed_password = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
 
 # Criação das tabelas
@@ -124,20 +127,16 @@ def authenticate_user(db: Session, email: str, password: str):
         return False
     return user
 
-async def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
+# ✅ CORREÇÃO: Nova função get_current_user compatível com Swagger
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    if not authorization or not authorization.startswith("Bearer "):
-        raise credentials_exception
-    
-    token = authorization.replace("Bearer ", "")
-    
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
