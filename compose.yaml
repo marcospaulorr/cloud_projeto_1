@@ -1,38 +1,49 @@
-version: "3.8"
+name: insper-cloud-projeto
 
 services:
   db:
     image: postgres:17
     container_name: cloud-db
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-projeto}
+      POSTGRES_USER: ${POSTGRES_USER:-projeto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-projeto123}
     ports:
-      - "${DB_PORT}:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-projeto} -d ${POSTGRES_DB:-projeto}"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - app-network
 
   app:
-    build: .
+    image: marcospauloricarte/insper-cloud-api:latest
     container_name: cloud-api
-    command: uvicorn app.app:app --host 0.0.0.0 --port 8000 --reload
-    env_file:
-      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-projeto}
+      DB_USER: ${POSTGRES_USER:-projeto}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-projeto123}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-TroqueEssaStringPorUmaMuitoAleatoria123!}
     ports:
       - "8000:8000"
-    volumes:
-      - ./app:/app/app
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - app-network
 
 volumes:
   pgdata:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

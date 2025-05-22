@@ -27,13 +27,10 @@ var/
 .venv/
 venv/
 ENV/
-env/
-env.bak/
 venv.bak/
 
 # dotenv environment variables
 .env
-.env.*
 
 # Installer logs
 pip-log.txt
