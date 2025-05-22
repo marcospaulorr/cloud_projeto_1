@@ -1,33 +1,34 @@
+version: "3.8"
+
 services:
+  db:
+    image: postgres:17
+    container_name: cloud-db
+    environment:
+      POSTGRES_DB:      ${DB_NAME}
+      POSTGRES_USER:    ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
   app:
     build: .
     container_name: cloud-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - .env               # injeta as mesmas variáveis no container
+    environment:
+      DOCKER_ENV: "true"   # exemplo de flag adicional
     ports:
       - "8000:8000"
+    volumes:
+      - ./app:/app/app     # live-reload em desenvolvimento
     depends_on:
       - db
-    env_file: 
-      - .env
-    environment:
-      - DOCKER_ENV=true
-    volumes:
-      - ./app:/app/app
-    restart: always
-
-  db:
-    image: mysql:8.0
-    container_name: cloud-db
-    command: --default-authentication-plugin=mysql_native_password
-    environment:
-      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
-      - MYSQL_DATABASE=${DB_NAME}
-      - MYSQL_USER=${DB_USER}
-      - MYSQL_PASSWORD=${DB_PASSWORD}
-    ports:
-      - "${DB_PORT}:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    restart: always
+    restart: unless-stopped
 
 volumes:
-  mysql_data:
+  pgdata:
