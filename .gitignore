@@ -31,6 +31,17 @@ venv.bak/
 
 # dotenv environment variables
 .env
+*/bin/
+*/lib/
+lib64
+.vscode/
+.DS_Store
+node_modules/
+dist/
+build/
+Thumbs.db
+.Trash-*
+.fuse_hidden*
 
 # Installer logs
 pip-log.txt
