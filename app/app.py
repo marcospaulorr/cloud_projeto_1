@@ -15,12 +15,13 @@ import socket
 from bs4 import BeautifulSoup
 import json
 from dotenv import load_dotenv
+import pymysql
 
 # Carregar variáveis de ambiente
 load_dotenv()
 
 # Configuração do banco de dados
-DATABASE_URL = os.getenv("DATABASE_URL") or "postgresql://projeto:projeto@db:5432/projeto"
+DATABASE_URL = os.getenv("DATABASE_URL") or f"mysql+pymysql://{os.getenv('MYSQL_USER')}:{os.getenv('MYSQL_PASSWORD')}@db:3306/{os.getenv('MYSQL_DATABASE')}"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -207,7 +208,6 @@ def get_data(current_user: User = Depends(get_current_user)):
 def health_check():
     return HealthCheck()
 
-# Execução da aplicação
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.app:app", host="0.0.0.0", port=8000, reload=True)

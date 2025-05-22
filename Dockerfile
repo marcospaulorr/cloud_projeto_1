@@ -1,13 +1,15 @@
-FROM python:3.11-slim
+# Dockerfile
+FROM python:3.10
 
+# Diretório de trabalho
 WORKDIR /app
 
-# Instalar dependências
-COPY requirements.txt .
+# Copia os arquivos
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar código da aplicação
-COPY app/ /app/app/
+# Copia o restante da aplicação
+COPY . .
 
-# Comando para iniciar a aplicação
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Executa o servidor Uvicorn
+CMD ["uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8000"]
