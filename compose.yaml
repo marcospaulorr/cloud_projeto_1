@@ -22,7 +22,8 @@ services:
       - app-network
 
   app:
-    image: marcospauloricarte/insper-cloud-api:latest
+    build: .
+    #image: marcospauloricarte/insper-cloud-api:latest
     container_name: cloud-api
     environment:
       DB_HOST: db

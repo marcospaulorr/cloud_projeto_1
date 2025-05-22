@@ -1,79 +1,71 @@
 import os
+import time
+import socket
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import List
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr, Field
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import create_engine, Column, Integer, String, MetaData, Table, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.exc import OperationalError
-import time
-import requests
-import socket
-from bs4 import BeautifulSoup
-import json
 from dotenv import load_dotenv
 
-# Carregar variáveis de ambiente
+# Carrega variáveis de ambiente de .env
 load_dotenv()
 
-# Configuração do banco de dados
-db_user = os.getenv("DB_USER")
-db_password = os.getenv("DB_PASSWORD")
-db_host = os.getenv("DB_HOST")
-db_port = os.getenv("DB_PORT")
-db_name = os.getenv("DB_NAME")
+# 1) CONFIGURAÇÃO DO BANCO
+# Configuração adicional para produção
+DB_USER = os.getenv("DB_USER", "admin")  # Muda para admin (padrão Lightsail)
+DB_PASSWORD = os.getenv("DB_PASSWORD", "SuaSenhaSegura123!")  
+DB_HOST = os.getenv("DB_HOST", "seu-db-endpoint.lightsail.aws")  # Será preenchido depois
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "fastapi_db")
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-DATABASE_URL = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-max_retries = 10
-for attempt in range(max_retries):
+# Espera o banco ficar pronto
+for _ in range(10):
     try:
         engine = create_engine(DATABASE_URL)
-        connection = engine.connect()
+        engine.connect().close()
         print("✅ Conectado ao banco com sucesso.")
-        connection.close()
         break
-    except OperationalError as e:
-        print(f"⏳ Tentativa {attempt+1}/{max_retries}: Banco ainda não está pronto...")
+    except OperationalError:
+        print("⏳ Aguardando banco...")
         time.sleep(2)
 else:
-    raise Exception("❌ Não foi possível conectar ao banco de dados.")
+    raise RuntimeError("❌ Não foi possível conectar ao banco de dados.")
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
-# Configuração do JWT
-SECRET_KEY = os.getenv("JWT_SECRET_KEY") or "segredo_super_secreto_para_desenvolvimento"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-# Configuração de criptografia para senhas
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# ✅ CORREÇÃO: Configuração de segurança para Swagger
-security = HTTPBearer()
-
-# Modelos de dados
+# 2) MODELO SQLALCHEMY
 class User(Base):
     __tablename__ = "users"
-    
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), index=True)
+    name = Column(String(255))
     email = Column(String(255), unique=True, index=True)
     hashed_password = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
 
-# Criação das tabelas
 Base.metadata.create_all(bind=engine)
 
-# Modelos Pydantic para validação e serialização
+# 3) CONFIGURAÇÃO JWT / CRIPTOGRAFIA
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "troque_esta_string_para_producao")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# 🔐 CONFIGURAÇÃO CORRETA PARA SWAGGER AUTHORIZE
+bearer_scheme = HTTPBearer()
+
+# 4) SCHEMAS Pydantic
 class UserCreate(BaseModel):
     name: str
     email: EmailStr
@@ -91,7 +83,7 @@ class HealthCheck(BaseModel):
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     hostname: str = Field(default_factory=lambda: socket.gethostname())
 
-# Funções auxiliares
+# 5) DEPENDÊNCIAS E FUNÇÕES AUXILIARES
 def get_db():
     db = SessionLocal()
     try:
@@ -99,135 +91,132 @@ def get_db():
     finally:
         db.close()
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def hash_password(password: str) -> str:
+    return pwd_ctx.hash(password)
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_ctx.verify(plain, hashed)
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+def create_access_token(sub: str) -> str:
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": sub, "exp": expire}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
 
-def authenticate_user(db: Session, email: str, password: str):
+def authenticate_user(db: Session, email: str, senha: str):
     user = get_user_by_email(db, email)
-    if not user:
-        return False
-    if not verify_password(password, user.hashed_password):
-        return False
+    if not user or not verify_password(senha, user.hashed_password):
+        return None
     return user
 
-# ✅ CORREÇÃO: Nova função get_current_user compatível com Swagger
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
+# 🔐 FUNÇÃO DE AUTENTICAÇÃO QUE FUNCIONA COM AUTHORIZE
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db)
+):
+    token = credentials.credentials
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
-            raise credentials_exception
+            raise JWTError()
     except JWTError:
-        raise credentials_exception
-        
-    user = get_user_by_email(db, email=email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token inválido ou expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = get_user_by_email(db, email)
     if user is None:
-        raise credentials_exception
-        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuário não encontrado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
-# Função para obter dados da Bolsa (web scraping)
-def get_bovespa_data():
-    # Simulação de dados da Bovespa
-    # Em produção, isso seria substituído por web scraping real ou API
-    data = [
-        {"Date": "2024-09-05", "Open": 136112.0, "High": 136656.0, "Low": 135959.0, "Close": 136502.0, "Volume": 7528700},
-        {"Date": "2024-09-06", "Open": 136508.0, "High": 136653.0, "Low": 134476.0, "Close": 134572.0, "Volume": 7563300},
-        {"Date": "2024-09-09", "Open": 134574.0, "High": 135250.0, "Low": 134399.0, "Close": 134737.0, "Volume": 6587600},
-        {"Date": "2024-09-10", "Open": 134738.0, "High": 134738.0, "Low": 133754.0, "Close": 134320.0, "Volume": 8253500},
-        {"Date": "2024-09-11", "Open": 134319.0, "High": 135087.0, "Low": 133757.0, "Close": 134677.0, "Volume": 7947300},
-        {"Date": "2024-09-12", "Open": 134677.0, "High": 134777.0, "Low": 133591.0, "Close": 134029.0, "Volume": 7004900},
-        {"Date": "2024-09-13", "Open": 134031.0, "High": 135879.0, "Low": 134031.0, "Close": 134882.0, "Volume": 8866000},
-        {"Date": "2024-09-16", "Open": 134885.0, "High": 135715.0, "Low": 134870.0, "Close": 135118.0, "Volume": 6707000}
-    ]
-    return data
+# 6) INICIALIZAÇÃO DO FastAPI
+app = FastAPI(
+    title="API RESTful Projeto 2025.1",
+    version="1.0.0",
+    description="Cadastro, login e endpoint protegido com JWT"
+)
 
-# Inicialização da aplicação FastAPI
-app = FastAPI(title="API RESTful Projeto 2025.1")
-
-# Configuração de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Endpoints
-@app.post("/registrar", response_model=Token)
-def register_user(user: UserCreate, db: Session = Depends(get_db)):
-    # Verificar se o email já existe
-    db_user = get_user_by_email(db, email=user.email)
-    if db_user:
+# 7) ENDPOINTS PÚBLICOS
+@app.post("/registrar", response_model=Token, summary="Registrar usuário")
+def registrar(user: UserCreate, db: Session = Depends(get_db)):
+    """Registra um novo usuário e retorna JWT token"""
+    if get_user_by_email(db, user.email):
         raise HTTPException(status_code=409, detail="Email já registrado")
     
-    # Criar novo usuário
-    hashed_password = get_password_hash(user.senha)
-    db_user = User(name=user.name, email=user.email, hashed_password=hashed_password)
-    
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    # Gerar token JWT
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+    novo = User(
+        name=user.name,
+        email=user.email,
+        hashed_password=hash_password(user.senha)
     )
+    db.add(novo)
+    db.commit()
+    db.refresh(novo)
     
-    return {"jwt": access_token}
+    token = create_access_token(novo.email)
+    return {"jwt": token}
 
-@app.post("/login", response_model=Token)
-def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    # Autenticar usuário
-    user = authenticate_user(db, user_data.email, user_data.senha)
+@app.post("/login", response_model=Token, summary="Login de usuário")
+def login(data: UserLogin, db: Session = Depends(get_db)):
+    """Autentica usuário e retorna JWT token"""
+    user = authenticate_user(db, data.email, data.senha)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email ou senha incorretos",
+            detail="Credenciais inválidas",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # Gerar token JWT
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
-    )
-    
-    return {"jwt": access_token}
+    return {"jwt": create_access_token(user.email)}
 
-@app.get("/consultar")
-def get_data(current_user: User = Depends(get_current_user)):
-    # Obter dados da Bovespa
-    bovespa_data = get_bovespa_data()
-    return bovespa_data
+# 8) ENDPOINT PROTEGIDO - CONFIGURAÇÃO CORRETA
+@app.get(
+    "/consultar",
+    summary="Consultar dados da Bovespa",
+    description="🔒 **Endpoint Protegido** - Requer autenticação JWT via botão Authorize",
+    response_model=List[dict]
+)
+def consultar(current_user: User = Depends(get_current_user)):
+    """
+    🔒 **Endpoint Protegido** - Requer autenticação JWT
+    
+    Para usar:
+    1. Registre-se ou faça login
+    2. Copie o JWT token da resposta  
+    3. Clique no botão 'Authorize' 🔒 acima
+    4. Cole apenas o token (sem 'Bearer')
+    5. Clique 'Authorize' e teste este endpoint
+    
+    Retorna dados simulados da Bovespa dos últimos 8 pregões.
+    """
+    return [
+        {"Date": "2024-09-05","Open":136112.0,"High":136656.0,"Low":135959.0,"Close":136502.0,"Volume":7528700},
+        {"Date": "2024-09-06","Open":136508.0,"High":136653.0,"Low":134476.0,"Close":134572.0,"Volume":7563300},
+        {"Date": "2024-09-09","Open":134574.0,"High":135250.0,"Low":134399.0,"Close":134737.0,"Volume":6587600},
+        {"Date": "2024-09-10","Open":134738.0,"High":134738.0,"Low":133754.0,"Close":134320.0,"Volume":8253500},
+        {"Date": "2024-09-11","Open":134319.0,"High":135087.0,"Low":133757.0,"Close":134677.0,"Volume":7947300},
+        {"Date": "2024-09-12","Open":134677.0,"High":134777.0,"Low":133591.0,"Close":134029.0,"Volume":7004900},
+        {"Date": "2024-09-13","Open":134031.0,"High":135879.0,"Low":134031.0,"Close":134882.0,"Volume":8866000},
+        {"Date": "2024-09-16","Open":134885.0,"High":135715.0,"Low":134870.0,"Close":135118.0,"Volume":6707000}
+    ]
 
-@app.get("/health-check", response_model=HealthCheck)
+# 9) HEALTH CHECK
+@app.get("/health-check", response_model=HealthCheck, summary="Health Check")
 def health_check():
+    """Verifica o status da aplicação"""
     return HealthCheck()
 
 if __name__ == "__main__":
