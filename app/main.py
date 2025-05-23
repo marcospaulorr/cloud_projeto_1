@@ -39,7 +39,7 @@ def registrar(user: UserCreate, db: Session = Depends(get_db)):
             detail="Email já registrado."
         )
     novo = User(
-        name=user.name,
+        nome=user.name,
         email=user.email,
         senha_hash=hash_password(user.senha)
     )
