@@ -1,6 +1,6 @@
 import socket
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Union
 
 from fastapi import FastAPI, Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -40,7 +40,7 @@ def registrar(user: UserCreate, db: Session = Depends(get_db)):
             detail="Email já registrado."
         )
     novo = User(
-        name=user.name,
+        nome=user.nome,
         email=user.email,
         senha_hash=hash_password(user.senha)
     )
@@ -61,7 +61,7 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
     token = create_jwt_token(db_user)
     return {"jwt": token}
 
-@app.get("/consultar", summary="Cotação USD/BRL", response_model=Dict[str,float])
+@app.get("/consultar", summary="Cotação USD/BRL", response_model=Dict[str, Union[str, float]])
 async def consultar(_=Depends(get_current_user)):
     """
     🔒 Endpoint protegido
