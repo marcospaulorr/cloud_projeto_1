@@ -1,25 +1,15 @@
-import yfinance as yf
-from datetime import datetime, timedelta
+# app/scraping.py
+import httpx
+from datetime import datetime
 
-def get_bovespa_data():
-    hoje = datetime.now()
-    inicio = hoje - timedelta(days=14)
-    df = yf.download("^BVSP",
-                     start=inicio.strftime("%Y-%m-%d"),
-                     end=hoje.strftime("%Y-%m-%d"))
-    # Pega só até 10 dias e formata
-    df = df.tail(10).reset_index()
-    if df.empty:
-        return []
-    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
-    resultado = []
-    for _, row in df.iterrows():
-        resultado.append({
-            "Date":  row["Date"],
-            "Open":  round(row["Open"],  2),
-            "High":  round(row["High"],  2),
-            "Low":   round(row["Low"],   2),
-            "Close": round(row["Close"], 2),
-            "Volume": int(row["Volume"]),
-        })
-    return resultado
+AWESOME_URL = "https://economia.awesomeapi.com.br/json/last/USD-BRL"
+
+async def get_usd_brl_rate():
+    async with httpx.AsyncClient(timeout=5) as client:
+        r = await client.get(AWESOME_URL)
+        r.raise_for_status()
+        data = r.json().get("USDBRL") or {}
+    return {
+        "date": data.get("create_date", datetime.utcnow().isoformat()),
+        "rate": float(data.get("bid", 0.0)),
+    }

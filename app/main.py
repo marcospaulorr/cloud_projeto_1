@@ -1,20 +1,21 @@
 import socket
 from datetime import datetime
-from typing import List
+from typing import List, Dict
 
 from fastapi import FastAPI, Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
+from app.scraping import get_usd_brl_rate
 from app.database import get_db, engine
 from app.models   import Base, User
 from app.schemas  import UserCreate, UserLogin, Token
 from app.auth     import (
     hash_password, verify_password,
-    get_user_by_email, create_jwt_token, decode_jwt
+    get_user_by_email, create_jwt_token, decode_jwt, get_current_user
 )
-from app.scraping import get_bovespa_data
+
 
 # Cria as tabelas se ainda não existirem
 Base.metadata.create_all(bind=engine)
@@ -39,7 +40,7 @@ def registrar(user: UserCreate, db: Session = Depends(get_db)):
             detail="Email já registrado."
         )
     novo = User(
-        nome=user.name,
+        name=user.name,
         email=user.email,
         senha_hash=hash_password(user.senha)
     )
@@ -60,23 +61,14 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
     token = create_jwt_token(db_user)
     return {"jwt": token}
 
-@app.get(
-    "/consultar",
-    summary="Consultar dados da Bovespa",
-    description="🔒 **Endpoint Protegido** - Requer autenticação JWT via botão Authorize",
-    response_model=List[dict]
-)
-def consultar(
-    credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)
-):
-    payload = decode_jwt(credentials.credentials)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Token inválido ou expirado.",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    return get_bovespa_data()
+@app.get("/consultar", summary="Cotação USD/BRL", response_model=Dict[str,float])
+async def consultar(_=Depends(get_current_user)):
+    """
+    🔒 Endpoint protegido
+    Retorna a cotação atual do dólar em relação ao real.
+    """
+    data = await get_usd_brl_rate()
+    return {"date": data["date"], "usd_brl": data["rate"]}
 
 @app.get("/health_check", summary="Health Check")
 def health_check():
