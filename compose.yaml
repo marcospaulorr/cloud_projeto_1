@@ -5,15 +5,15 @@ services:
     image: postgres:17
     container_name: cloud-db
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-projeto}
-      POSTGRES_USER: ${POSTGRES_USER:-projeto}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-projeto123}
+      POSTGRES_DB:    ${DB_NAME}
+      POSTGRES_USER:  ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-projeto} -d ${POSTGRES_DB:-projeto}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,15 +23,9 @@ services:
 
   app:
     build: .
-    #image: marcospauloricarte/insper-cloud-api:latest
     container_name: cloud-api
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-projeto}
-      DB_USER: ${POSTGRES_USER:-projeto}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-projeto123}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-TroqueEssaStringPorUmaMuitoAleatoria123!}
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     depends_on:
