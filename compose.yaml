@@ -22,7 +22,7 @@ services:
       - app-network
 
   app:
-    build: .
+    image: marcospauloricarte/insper-cloud-api:latest
     container_name: cloud-api
     env_file:
       - .env

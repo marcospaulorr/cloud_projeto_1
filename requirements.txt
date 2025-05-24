@@ -12,4 +12,4 @@ httpx
 yfinance
 pandas
 PyJWT
-psycopg2
+psycopg2-binary
